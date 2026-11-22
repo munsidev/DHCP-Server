@@ -107,6 +107,20 @@ When operating in an authorized Ubuntu lab environment:
 ./dhcp-toolkit.sh
 ```
 
+### Step 6: Safe 1-VM Live Demonstration (No Second VM Needed!)
+To demonstrate a real client acquiring a real IP address on a single Ubuntu machine without touching physical/Wi-Fi adapters:
+```bash
+# Terminal 1: Start isolated virtual network and launch server
+sudo ./demo-lab.sh start
+sudo ./demo-lab.sh server    # Option 2 -> select 'veth-srv', Option 3, Option 6
+
+# Terminal 2: Trigger virtual client to request IP
+sudo ./demo-lab.sh client    # Displays live DORA handshake and assigned IP!
+
+# Clean up when demonstration ends
+sudo ./demo-lab.sh stop
+```
+
 ---
 
 ## 5. Menu-Driven Interface Guide

@@ -293,6 +293,25 @@ validate_lease_duration() {
     return 1
 }
 
+is_in_netns() {
+    if command -v ip >/dev/null 2>&1; then
+        local ns
+        ns="$(ip netns identify $$ 2>/dev/null || true)"
+        if [[ -n "${ns}" ]]; then
+            return 0
+        fi
+    fi
+    if [[ -e "/proc/1/ns/net" && -e "/proc/$$/ns/net" ]]; then
+        local root_ns current_ns
+        root_ns="$(readlink /proc/1/ns/net 2>/dev/null || true)"
+        current_ns="$(readlink /proc/$$/ns/net 2>/dev/null || true)"
+        if [[ -n "${root_ns}" && -n "${current_ns}" && "${root_ns}" != "${current_ns}" ]]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # ------------------------------------------------------------------------------
 # System & Environment Pre-flight Diagnostics
 # ------------------------------------------------------------------------------
@@ -1238,7 +1257,15 @@ start_or_restart_service() {
     log_msg "INFO" "Restarting dnsmasq service..."
     local restart_ok=false
 
-    if command -v systemctl >/dev/null 2>&1; then
+    if is_in_netns; then
+        local current_ns
+        current_ns="$(ip netns identify $$ 2>/dev/null || echo "isolated-netns")"
+        log_msg "INFO" "Running inside network namespace (${current_ns}). Starting dnsmasq process directly inside namespace..."
+        pkill -x dnsmasq 2>/dev/null || true
+        if dnsmasq --conf-file="${target_file}"; then
+            restart_ok=true
+        fi
+    elif command -v systemctl >/dev/null 2>&1; then
         if [[ "${EUID}" -eq 0 ]]; then
             systemctl restart dnsmasq && restart_ok=true || true
         else
@@ -1287,7 +1314,10 @@ stop_dhcp_service() {
     log_msg "INFO" "Stopping dnsmasq service..."
     local stop_ok=false
 
-    if command -v systemctl >/dev/null 2>&1; then
+    if is_in_netns; then
+        log_msg "INFO" "Stopping dnsmasq process inside network namespace..."
+        pkill -x dnsmasq 2>/dev/null && stop_ok=true || true
+    elif command -v systemctl >/dev/null 2>&1; then
         if [[ "${EUID}" -eq 0 ]]; then
             systemctl stop dnsmasq && stop_ok=true || true
         else
@@ -1317,9 +1347,15 @@ check_service_and_leases() {
 
 " "${C_BOLD}=== DHCP Service Status & Active Leases ===${C_RESET}"
 
-    printf "${C_WHITE}${C_BOLD}[1] Systemd Service Status:${C_RESET}\n"
+    printf "${C_WHITE}${C_BOLD}[1] Service Status:${C_RESET}\n"
     if [[ "${DRY_RUN_MODE}" == true ]]; then
         printf "${C_MAGENTA}[DRY-RUN] Simulated Service State: Active (running)${C_RESET}\n"
+    elif is_in_netns; then
+        if pgrep -x dnsmasq >/dev/null 2>&1; then
+            printf "${C_GREEN}dnsmasq process is RUNNING inside namespace (PID: %s)${C_RESET}\n" "$(pgrep -x dnsmasq | tr '\n' ' ')"
+        else
+            printf "${C_RED}dnsmasq is NOT running inside this network namespace.${C_RESET}\n"
+        fi
     elif command -v systemctl >/dev/null 2>&1; then
         systemctl status dnsmasq --no-pager -l || true
     elif command -v service >/dev/null 2>&1; then

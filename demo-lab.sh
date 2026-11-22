@@ -78,6 +78,41 @@ start_lab() {
     printf "          ${C_CYAN}sudo ./demo-lab.sh client${C_RESET}\n\n"
 }
 
+ensure_server_configured_and_running() {
+    # Check if dnsmasq is installed
+    if ! command -v dnsmasq >/dev/null 2>&1; then
+        printf "${C_YELLOW}Installing dnsmasq...${C_RESET}\n"
+        apt-get update -qq && apt-get install -y -qq dnsmasq
+    fi
+
+    # Ensure /etc/dnsmasq.d exists
+    mkdir -p /etc/dnsmasq.d
+    mkdir -p /var/lib/misc
+
+    # If dhcp-toolkit.conf doesn't exist, create default for veth-srv
+    local conf_file="/etc/dnsmasq.d/dhcp-toolkit.conf"
+    if [[ ! -f "${conf_file}" ]] || ! grep -q "interface=${IFACE_SERVER}" "${conf_file}"; then
+        printf "Writing lab configuration to %s...\n" "${conf_file}"
+        cat << EOF > "${conf_file}"
+# DHCP Lab Configuration for isolated veth interface
+interface=${IFACE_SERVER}
+bind-interfaces
+dhcp-range=192.168.50.10,192.168.50.50,255.255.255.0,12h
+dhcp-option=option:netmask,255.255.255.0
+dhcp-option=option:router,192.168.50.1
+dhcp-option=option:dns-server,8.8.8.8
+dhcp-leasefile=/var/lib/misc/dnsmasq.leases
+dhcp-authoritative
+port=0
+EOF
+    fi
+
+    # Start dnsmasq inside server namespace
+    ip netns exec "${NS_SERVER}" pkill -x dnsmasq 2>/dev/null || true
+    ip netns exec "${NS_SERVER}" dnsmasq --conf-file="${conf_file}"
+    printf "${C_GREEN}[SUCCESS] DHCP server started inside %s listening on %s (192.168.50.1)!${C_RESET}\n\n" "${NS_SERVER}" "${IFACE_SERVER}"
+}
+
 run_server() {
     require_root "server"
 
@@ -97,8 +132,15 @@ run_client() {
     require_root "client"
 
     if ! ip netns list | grep -qw "${NS_CLIENT}"; then
-        printf "${C_RED}[ERROR] Virtual lab is not running! Run 'sudo ./demo-lab.sh start' first.${C_RESET}\n" >&2
-        exit 1
+        printf "${C_YELLOW}Virtual lab is not running yet. Starting it now...${C_RESET}\n"
+        start_lab
+    fi
+
+    # Verify that the DHCP server is running inside the server namespace
+    if ! ip netns exec "${NS_SERVER}" pgrep -x dnsmasq >/dev/null 2>&1; then
+        printf "${C_YELLOW}[!] DHCP server (dnsmasq) is not currently running inside %s.${C_RESET}\n" "${NS_SERVER}"
+        printf "${C_CYAN}Auto-starting DHCP server on %s (192.168.50.1)...${C_RESET}\n" "${IFACE_SERVER}"
+        ensure_server_configured_and_running
     fi
 
     printf "${C_CYAN}${C_BOLD}=== Requesting Real IP Address from Client Namespace ===${C_RESET}\n"
@@ -153,6 +195,20 @@ run_client() {
     show_status
 }
 
+run_full_demo() {
+    require_root "demo"
+    start_lab
+    ensure_server_configured_and_running
+    run_client
+    printf "${C_BOLD}Active DHCP Leases Table (/var/lib/misc/dnsmasq.leases):${C_RESET}\n"
+    if [[ -f "/var/lib/misc/dnsmasq.leases" ]]; then
+        cat /var/lib/misc/dnsmasq.leases
+    else
+        printf "No leases recorded yet.\n"
+    fi
+    printf "\n${C_GREEN}${C_BOLD}[DEMO COMPLETE] Both Server and Client are verified working on 1 VM!${C_RESET}\n"
+}
+
 show_status() {
     require_root "status"
 
@@ -196,6 +252,7 @@ print_help() {
 Usage: sudo $(basename "$0") <COMMAND>
 
 Commands for 1-VM Safe Demonstration:
+  demo      Run COMPLETE all-in-one demonstration (start -> server -> client -> lease table)
   start     Set up isolated virtual client/server namespaces and virtual cable
   server    Launch dhcp-toolkit.sh inside the server namespace
   client    Request a real IP address on the client (shows DORA handshake)
@@ -203,15 +260,22 @@ Commands for 1-VM Safe Demonstration:
   stop      Safely tear down the virtual namespaces and clean up
 
 Demonstration Flow for Professor:
-  1. Terminal 1: sudo $(basename "$0") start
-  2. Terminal 1: sudo $(basename "$0") server  (Option 2 -> veth-srv, Option 3, Option 6)
-  3. Terminal 2: sudo $(basename "$0") client  (Watch real DORA handshake & IP allocation)
-  4. Terminal 1: In toolkit menu, choose Option 7 to show the real-time lease table!
-  5. Terminal 1: sudo $(basename "$0") stop
+  Easiest (1-command live demo):
+    sudo $(basename "$0") demo
+
+  Or manual 2-terminal walkthrough:
+    Terminal 1: sudo $(basename "$0") start
+    Terminal 1: sudo $(basename "$0") server  (Option 2 -> veth-srv, Option 3, Option 6)
+    Terminal 2: sudo $(basename "$0") client  (Watch real DORA handshake & IP allocation)
+    Terminal 1: In toolkit menu, choose Option 7 to show the real-time lease table!
+    Terminal 1: sudo $(basename "$0") stop
 EOF
 }
 
 case "${1:-help}" in
+    demo|test|run)
+        run_full_demo
+        ;;
     start|setup)
         start_lab
         ;;

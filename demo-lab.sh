@@ -104,19 +104,52 @@ run_client() {
     printf "${C_CYAN}${C_BOLD}=== Requesting Real IP Address from Client Namespace ===${C_RESET}\n"
     printf "Triggering DHCP DORA transaction over virtual cable...\n\n"
 
-    # Check for dhclient
-    if ! command -v dhclient >/dev/null 2>&1; then
-        printf "${C_YELLOW}'dhclient' not found. Installing isc-dhclient...${C_RESET}\n"
-        apt-get update -qq && apt-get install -y -qq isc-dhclient
+    # Find or install an available DHCP client utility (dhclient, udhcpc, or busybox)
+    local client_bin=""
+    if command -v dhclient >/dev/null 2>&1; then
+        client_bin="dhclient"
+    elif command -v udhcpc >/dev/null 2>&1; then
+        client_bin="udhcpc"
+    elif command -v busybox >/dev/null 2>&1 && busybox udhcpc --help >/dev/null 2>&1; then
+        client_bin="busybox"
+    elif command -v dhcpcd >/dev/null 2>&1; then
+        client_bin="dhcpcd"
+    else
+        printf "${C_YELLOW}No DHCP client found. Attempting package installation...${C_RESET}\n"
+        # Try isc-dhcp-client first, then udhcpc, then busybox-static
+        apt-get update -qq && (apt-get install -y -qq isc-dhcp-client || apt-get install -y -qq udhcpc || apt-get install -y -qq busybox-static) || true
+        if command -v dhclient >/dev/null 2>&1; then
+            client_bin="dhclient"
+        elif command -v udhcpc >/dev/null 2>&1; then
+            client_bin="udhcpc"
+        elif command -v busybox >/dev/null 2>&1 && busybox udhcpc --help >/dev/null 2>&1; then
+            client_bin="busybox"
+        fi
     fi
 
-    # Release any prior lease
-    ip netns exec "${NS_CLIENT}" dhclient -r "${IFACE_CLIENT}" >/dev/null 2>&1 || true
+    if [[ -z "${client_bin}" ]]; then
+        printf "${C_RED}[ERROR] Could not find or install a DHCP client (dhclient/udhcpc).${C_RESET}\n" >&2
+        printf "Please run: sudo apt-get install -y isc-dhcp-client (or udhcpc)\n" >&2
+        exit 1
+    fi
 
-    # Request new lease with verbose output showing DORA handshake
-    ip netns exec "${NS_CLIENT}" dhclient -v -1 "${IFACE_CLIENT}"
+    case "${client_bin}" in
+        dhclient)
+            ip netns exec "${NS_CLIENT}" dhclient -r "${IFACE_CLIENT}" >/dev/null 2>&1 || true
+            ip netns exec "${NS_CLIENT}" dhclient -v -1 "${IFACE_CLIENT}"
+            ;;
+        udhcpc)
+            ip netns exec "${NS_CLIENT}" udhcpc -i "${IFACE_CLIENT}" -n -q -f || true
+            ;;
+        busybox)
+            ip netns exec "${NS_CLIENT}" busybox udhcpc -i "${IFACE_CLIENT}" -n -q -f || true
+            ;;
+        dhcpcd)
+            ip netns exec "${NS_CLIENT}" dhcpcd -1 -d "${IFACE_CLIENT}"
+            ;;
+    esac
 
-    printf "\n${C_GREEN}${C_BOLD}[SUCCESS] Client received an IP address!${C_RESET}\n\n"
+    printf "\n${C_GREEN}${C_BOLD}[SUCCESS] Client DHCP request completed!${C_RESET}\n\n"
     show_status
 }
 

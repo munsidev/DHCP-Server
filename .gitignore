@@ -1,0 +1,16 @@
+# Logs and temporary execution files
+*.log
+dhcp-toolkit.log
+
+# Preview and mock configuration files
+*.preview
+dnsmasq-dhcp-toolkit.conf.preview
+*.leases
+dnsmasq.leases
+
+# Backup files
+*.bak*
+
+# macOS and OS metadata
+.DS_Store
+Thumbs.db

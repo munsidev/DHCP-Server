@@ -1,33 +1,29 @@
 # DHCP Server Setup and Management Toolkit (`dnsmasq`)
 
 **Operating Systems Course Project**  
-*Systems Programming and Network Administration Lab*  
-*Target Environment: Ubuntu Linux (20.04 LTS, 22.04 LTS, 24.04 LTS)*
+*Systems Programming & Network Administration Lab*  
+*Target Platform: Ubuntu Linux (20.04 LTS, 22.04 LTS, 24.04 LTS)*  
+*Repository: [https://github.com/munsidev/DHCP-Server.git](https://github.com/munsidev/DHCP-Server.git)*
 
 ---
 
 ## 1. Project Overview
 
-The **DHCP Server Setup and Management Toolkit** is a robust, menu-driven Bash application designed to configure, validate, manage, and monitor an isolated Dynamic Host Configuration Protocol (DHCP) server on Ubuntu Linux using `dnsmasq`.
+The **DHCP Server Setup and Management Toolkit** is an automated, menu-driven Bash application designed to configure, validate, manage, and monitor a real Dynamic Host Configuration Protocol (DHCP) server on Ubuntu Linux using `dnsmasq`.
 
-The toolkit bridges theoretical Operating Systems concepts—such as protocol state machines, inter-process communication, network socket management, daemon control, and resource allocation—with practical, defensive systems engineering.
+It bridges core Operating Systems concepts—protocol state machines, process isolation, socket binding, daemon lifecycle, inter-process communication, and resource allocation—with practical, defensive systems engineering.
 
 ### Key Capabilities
-- **Automated Environment Diagnostics**: Inspects Ubuntu distribution releases, sudo administrative rights, required networking utilities (`iproute2`, `systemctl`), and detects existing socket conflicts on UDP port 67 (DHCP) and UDP port 53 (DNS).
-- **Interactive Interface Inspection**: Discovers all non-loopback network adapters, displays current IPv4 addresses, subnet masks, and interface states, and alerts the administrator if a static IP is missing.
-- **Defensive Configuration Wizard**:
-  - Validates IPv4 address syntaxes and CIDR boundaries.
-  - Ensures pool consistency within the server's subnet.
-  - **Enforces Server IP Anti-Overlap**: Rejects configuration if the server's own static IP falls within the dynamically allocated client pool.
-  - Configures customizable lease lifetimes, optional default gateways (Option 3), and DNS resolvers (Option 6).
-- **Conflict Avoidance Architecture**:
-  - Automatically isolates configuration in `/etc/dnsmasq.d/dhcp-toolkit.conf`.
-  - Disables the DNS listener (`port=0`) when running purely as a DHCP service to prevent socket binding collisions with Ubuntu's default `systemd-resolved` service.
-- **Safe Lifecycle Management**:
-  - Atomic backups of configuration files prior to modifications (`.bak.<timestamp>`).
-  - Pre-flight syntax validation using `dnsmasq --test` before touching live system services.
-  - Surgical teardown: removes only project-managed settings, leaving existing system services and other configurations untouched.
-- **Dry-Run Planning Engine**: Complete simulation mode allowing risk-free review of configuration staging, syntax checks, and systemd commands without root privileges or system modifications.
+- **Dual Demonstration Tracks**:
+  - **Track A (1-VM Demo Mode)**: Uses Linux Network Namespaces (`ip netns`) and virtual ethernet (`veth`) cables to simulate a real client and server with a **live DORA handshake on a single machine**, without touching your internet connection.
+  - **Track B (Real Multi-Machine Mode)**: Full setup for an isolated physical lab switch or a 2-VM hypervisor environment (VirtualBox, VMware, KVM).
+- **Automated Pre-Flight Diagnostics**: Inspects Ubuntu releases, root/sudo execution rights, required utilities (`iproute2`, `systemctl`), and detects existing socket conflicts on UDP port 67 (DHCP) and UDP port 53 (DNS).
+- **Pure-Bash IP Mathematics**: Validates IPv4 dotted-quad syntax, verifies contiguous netmask bitmasks, computes network/broadcast boundaries, and calculates CIDR prefixes without using external binaries or unsafe `eval`.
+- **Server IP Anti-Overlap Invariant**: Automatically calculates network boundaries and strictly rejects configuration if the server's own static IP falls inside the dynamically allocated client pool.
+- **Port 53 Conflict Resolution**: Injects `port=0` to run purely as a DHCP daemon, completely avoiding port collisions with Ubuntu's default `systemd-resolved` service.
+- **Safe Modular Configuration**: Keeps project settings isolated in `/etc/dnsmasq.d/dhcp-toolkit.conf`. Monolithic system files (`/etc/dnsmasq.conf`) and unrelated services remain completely untouched.
+- **Atomic Backups & Safe Teardown**: Creates timestamped backups (`.bak.<timestamp>`) before any write, enforces syntax validation (`dnsmasq --test`) before reloads, and provides a 1-click surgical rollback option.
+- **Non-Destructive Dry-Run Engine**: Allows review and testing of configuration staging, syntax checks, and systemd service commands without root access or system modifications.
 
 ---
 
@@ -37,260 +33,346 @@ The toolkit bridges theoretical Operating Systems concepts—such as protocol st
 > **DO NOT DEPLOY THIS TOOLKIT ON PUBLIC, CAMPUS, OFFICE, OR HOME WI-FI NETWORKS.**
 
 ### Understanding Rogue DHCP Disruption
-The DHCP protocol operates via unauthenticated UDP broadcasts (`255.255.255.255` across port 67/68). In an ethernet broadcast domain:
-1. **Race Conditions**: When client machines send a `DHCPDISCOVER` packet, all DHCP servers on the broadcast domain reply with a `DHCPOFFER`. The client typically accepts the first offer received.
-2. **IP Collisions & Routing Blackholes**: If an unauthorized server offers IP addresses from an incompatible subnet or with a non-existent default gateway, legitimate client computers will lose internet/intranet access immediately.
-3. **Man-In-The-Middle (MitM)**: Offering a rogue gateway or rogue DNS server allows an adversary to hijack and inspect all outbound network traffic.
+The DHCP protocol operates via unauthenticated UDP broadcasts (`255.255.255.255` across ports 67 and 68). In any shared ethernet broadcast domain:
+1. **Broadcast Race Conditions**: When client devices send a `DHCPDISCOVER` packet, all DHCP servers on the broadcast domain reply with a `DHCPOFFER`. Clients typically accept the fastest reply.
+2. **IP Collisions & Blackholes**: If an unauthorized server issues IP addresses from an incompatible subnet or with a non-existent gateway, legitimate computers will immediately lose intranet and internet connectivity.
+3. **Man-In-The-Middle (MitM)**: Offering a rogue default gateway or DNS resolver allows an attacker to intercept, inspect, or tamper with outbound user traffic.
 
-### Authorized Usage Scope
-This project is strictly designed for:
-- Isolated virtual machine networks (e.g., VirtualBox **Host-Only** or **Internal Network**, VMware **LAN Segment**, KVM isolated bridge).
-- Linux network namespaces (`ip netns`).
-- Air-gapped physical lab switch segments where you have been explicitly authorized by faculty or network administrators.
-
-The toolkit includes an automated safety interlock: if a wireless interface (`wl*`, `wlan*`) or an interface holding the default internet route is selected, live operations are blocked unless an explicit authorization phrase (`CONFIRM-ISOLATED-LAB`) is entered.
+### Built-in Safety Interlocks
+The toolkit includes automatic safeguards:
+- Scans for active wireless interfaces (`wl*`, `wlan*`, `/sys/class/net/*/wireless`) and warns of severe disruption. Live activation requires typing `CONFIRM-ISOLATED-LAB`.
+- Detects whether the selected interface carries the host's default internet route.
+- Probes UDP port 67 before startup to prevent collisions with pre-existing DHCP daemons.
 
 ---
 
-## 3. System Requirements & Architecture
+## 3. Demonstration Track A: 1-VM Quick Live Demo for Your Professor (Recommended)
 
-### Prerequisites
-- **Operating System**: Ubuntu Linux 20.04 LTS (Focal), 22.04 LTS (Jammy), or 24.04 LTS (Noble).
-- **Core Utility**: `dnsmasq` and `dnsmasq-base` (can be installed interactively via Option 4 of the toolkit).
-- **System Tools**: `iproute2` (`ip`), `systemd` (`systemctl`), `ss` or `lsof`, `grep`, `sed`, `awk`.
-- **Privileges**: Standard user with `sudo` permissions or root (`EUID 0`).
+*Use this track if you have only **one Ubuntu machine or VM** and want to demonstrate a real client receiving a real IP address live, with zero risk to your Wi-Fi or internet connection.*
 
-### Configuration Architecture
-Rather than overwriting the monolithic `/etc/dnsmasq.conf`, this toolkit adopts Debian/Ubuntu's modular configuration directory pattern:
+### How It Works
+Linux provides built-in kernel isolation primitives called **Network Namespaces (`ip netns`)**—the core technology underpinning Docker and Kubernetes. The included [`demo-lab.sh`](file:///Users/macbook/Documents/DHCP-Server/demo-lab.sh) script creates two isolated namespaces (`server_ns` and `client_ns`) connected by a virtual ethernet cable (`veth-srv` $\leftrightarrow$ `veth-clt`).
 
 ```
-/etc/
-├── dnsmasq.conf                 <-- Preserved untouched (ensures conf-dir=/etc/dnsmasq.d is loaded)
-└── dnsmasq.d/
-    ├── README                   <-- System documentation
-    ├── other-services.conf      <-- Preserved untouched
-    ├── dhcp-toolkit.conf        <-- MANAGED EXCLUSIVELY BY THIS TOOLKIT
-    └── dhcp-toolkit.conf.bak.*  <-- Timestamped backups created before any modification
++-------------------------------------------------------------------------+
+|                         SINGLE UBUNTU MACHINE                           |
+|                                                                         |
+|   +-----------------------+              +-----------------------+      |
+|   |   Server Namespace    |              |   Client Namespace    |      |
+|   |      (server_ns)      |              |      (client_ns)      |      |
+|   |                       |              |                       |      |
+|   |  dhcp-toolkit.sh      |              |  dhclient / udhcpc    |      |
+|   |  (dnsmasq on UDP 67)  |              |  (DHCP Client)        |      |
+|   |                       |              |                       |      |
+|   |  Interface: veth-srv  |<============>|  Interface: veth-clt  |      |
+|   |  Static IP:           | Virtual VETH |  Assigned IP:         |      |
+|   |  192.168.50.1/24      | Cable Pair   |  192.168.50.42/24     |      |
+|   +-----------------------+              +-----------------------+      |
+|                                                                         |
+|   [Host Physical / Wi-Fi Adapter (PCI Ethernet) - 100% UNTOUCHED]       |
++-------------------------------------------------------------------------+
 ```
 
 ---
 
-## 4. Quick Start Guide
+### Method A1: 1-Command All-In-One Live Demo
 
-### Step 1: Clone / Download and Set Permissions
+In your terminal:
 ```bash
-cd ~/Documents/DHCP-Server
-chmod +x dhcp-toolkit.sh
+cd DHCP-Server
+sudo ./demo-lab.sh demo
 ```
 
-### Step 2: Run Built-In Self-Tests
-Verify that bash mathematical routines, subnet calculators, and overlap checks pass:
-```bash
-./dhcp-toolkit.sh --test-math
-```
+**What happens automatically:**
+1. Creates the isolated virtual cable (`veth-srv` $\leftrightarrow$ `veth-clt`).
+2. Configures and starts the DHCP server on `192.168.50.1`.
+3. Triggers the client to request an IP over the virtual cable.
+4. Outputs the real-time **DORA Handshake** on your screen.
+5. Prints the assigned IP address and displays the active lease table!
 
-### Step 3: Run Pre-Flight Diagnostics
-Inspect the system environment, port bindings, and tool readiness:
-```bash
-./dhcp-toolkit.sh --check
-```
+---
 
-### Step 4: Launch Interactive Menu in Dry-Run Mode
-Simulate operations without touching `/etc`:
-```bash
-./dhcp-toolkit.sh --dry-run
-```
+### Method A2: Interactive 2-Terminal Live Walkthrough
 
-### Step 5: Launch Live Interactive Menu
-When operating in an authorized Ubuntu lab environment:
-```bash
-./dhcp-toolkit.sh
-```
+For an in-depth demonstration where you show the menu interface to your professor:
 
-### Step 6: Safe 1-VM Live Demonstration (No Second VM Needed!)
-To demonstrate a real client acquiring a real IP address on a single Ubuntu machine without touching physical/Wi-Fi adapters:
+#### Terminal 1 — Start the Server:
 ```bash
-# Terminal 1: Start isolated virtual network and launch server
+cd DHCP-Server
+# 1. Start the virtual network cable
 sudo ./demo-lab.sh start
-sudo ./demo-lab.sh server    # Option 2 -> select 'veth-srv', Option 3, Option 6
 
-# Terminal 2: Trigger virtual client to request IP
-sudo ./demo-lab.sh client    # Displays live DORA handshake and assigned IP!
+# 2. Launch the menu inside the server namespace
+sudo ./demo-lab.sh server
+```
+Inside the interactive menu:
+1. Select **Option 2** $\to$ Choose the virtual interface `veth-srv`.
+2. Select **Option 3** $\to$ Run the Configuration Wizard:
+   - Server IP: `192.168.50.1` (Netmask: `255.255.255.0`)
+   - Pool Start: `192.168.50.10`
+   - Pool End: `192.168.50.50`
+   - Lease Duration: `12h`
+   - Default Gateway: `192.168.50.1`
+   - DNS Server: `8.8.8.8`
+   - Save configuration: `yes`
+3. Select **Option 5** $\to$ Validate syntax with `dnsmasq --test`.
+4. Select **Option 6** $\to$ Start the DHCP service!
 
-# Clean up when demonstration ends
+#### Terminal 2 — Request IP from the Client:
+Open a second terminal window and run:
+```bash
+sudo ./demo-lab.sh client
+```
+
+#### What You and Your Professor Will See (Live DORA Handshake):
+```text
+=== Requesting Real IP Address from Client Namespace ===
+Triggering DHCP DORA transaction over virtual cable...
+
+Listening on LPF/veth-clt/aa:73:65:22:4a:55
+Sending on   LPF/veth-clt/aa:73:65:22:4a:55
+DHCPDISCOVER on veth-clt to 255.255.255.255 port 67 interval 3
+DHCPOFFER of 192.168.50.42 from 192.168.50.1
+DHCPREQUEST for 192.168.50.42 on veth-clt to 255.255.255.255 port 67
+DHCPACK of 192.168.50.42 from 192.168.50.1
+bound to 192.168.50.42 -- renewal in 20509 seconds.
+
+[SUCCESS] Client DHCP request completed!
+
+--- Current Isolated Lab Network Status ---
+[Server Namespace: server_ns]
+veth-srv@if6     UP             192.168.50.1/24
+
+[Client Namespace: client_ns]
+veth-clt@if7     UP             192.168.50.42/24
+Assigned Routes:
+default via 192.168.50.1 dev veth-clt 
+192.168.50.0/24 dev veth-clt proto kernel scope link src 192.168.50.42
+```
+
+#### Terminal 1 — Inspect Active Leases:
+Return to Terminal 1 and select **Option 7** in the toolkit menu:
+- The formatted table will show the client's MAC address, allocated IP `192.168.50.42`, and expiration time parsed directly from `/var/lib/misc/dnsmasq.leases`.
+
+#### Clean Up When Finished:
+```bash
 sudo ./demo-lab.sh stop
 ```
+*Deletes the virtual namespaces and returns your machine to its original state.*
 
 ---
 
-## 5. Menu-Driven Interface Guide
+## 4. Demonstration Track B: Real Multi-Machine / 2-VM Lab Setup
 
-Upon launching `./dhcp-toolkit.sh`, the interactive main menu is presented:
+*Use this track if your course requires two separate virtual machines or physical PCs connected over an isolated lab switch.*
 
-```
-================================================================================
-           DHCP SERVER SETUP & MANAGEMENT TOOLKIT (dnsmasq)
-             Operating Systems Course Project - Lab Edition
-================================================================================
-
-Active Configuration Context:
-  Interface:      [Not Selected]
-  Server IP:      [None]
-  DHCP Pool:      None - None
-  Dry-Run Mode:   DISABLED (Live System)
-
-Main Menu Operations:
-  [1]  Run Pre-flight Diagnostics (OS, Tools, Sudo, Port Conflicts)
-  [2]  Select Network Interface & Inspect Details
-  [3]  Configure DHCP Server Settings (Pool, Leases, Gateway, DNS)
-  [4]  Install / Verify dnsmasq Package
-  [5]  Validate Configuration File Syntax (dnsmasq --test)
-  [6]  Start / Restart DHCP Service
-  [7]  View DHCP Service Status & Active Leases
-  [8]  Stop DHCP Service
-  [9]  View Staged / Active Configuration File
-  [10] Remove Project Configuration & Clean Up (Safe Teardown)
-  [11] Review Firewall (UFW) and Netplan Guidance
-  [12] Toggle Dry-Run Mode
-  [13] Run Built-In Self-Tests (IP Math & Validation)
-  [0]  Exit Toolkit
-```
-
-### Walkthrough of Operations
-
-#### Option 1: Pre-flight Diagnostics
-Checks whether the host is running Ubuntu, verifies `sudo` access, checks for installed utilities, and examines UDP port 67 and UDP port 53. If port 67 is already bound, it warns that another DHCP service (like `isc-dhcp-server` or `kea`) is active.
-
-#### Option 2: Select Network Interface
-Scans for non-loopback network adapters (e.g., `eth0`, `ens33`, `enp0s3`, `veth*`), displays their current IPv4 address, netmask, and type. If an interface lacks a static IP, the toolkit warns that DHCP servers require a static IP address on the serving interface.
-
-#### Option 3: Configure DHCP Server Settings
-Guides the administrator through setting:
-- **Server Static IP & Netmask**: Automatically derived from the chosen interface or entered manually.
-- **Subnet Boundary Display**: Calculates Network Address, Broadcast Address, and First/Last Usable host addresses.
-- **DHCP Pool Start & End IP**: Enforces that the range resides within the subnet and **verifies that the server's own IP does not overlap with the pool**.
-- **Lease Duration**: Validates formats such as `12h`, `24h`, `7d`, `45m`, or `infinite`.
-- **Default Gateway (Router Option 3)**: Optional gateway IP; validated to ensure it belongs to the same subnet.
-- **DNS Servers (Option 6)**: Comma-separated list of valid IPv4 addresses (e.g., `8.8.8.8,1.1.1.1`).
-- **Domain Name (Option 15)**: Optional local search domain (e.g., `oslab.local`).
-
-#### Option 4: Install / Verify `dnsmasq`
-Displays the exact `apt-get` command that will be executed and asks for explicit confirmation before installing packages. Reinstallation is skipped if already installed.
-
-#### Option 5: Validate Configuration File Syntax
-Executes `dnsmasq --test --conf-file=/etc/dnsmasq.d/dhcp-toolkit.conf`. Verifies syntax and configuration validity without starting or interrupting services.
-
-#### Option 6: Start / Restart DHCP Service
-First enforces a syntax test. If valid, restarts the `dnsmasq` service via `systemctl restart dnsmasq` and enables it for system startup.
-
-#### Option 7: View DHCP Service Status & Active Leases
-Displays:
-1. `systemctl status dnsmasq` output.
-2. Active UDP port 67 socket binding.
-3. Formatted table of active client leases from `/var/lib/misc/dnsmasq.leases`:
-   - Expiration date and time (converted from epoch to human-readable format).
-   - Client MAC address.
-   - Assigned IPv4 address.
-   - Client hostname.
-   - Client identifier (DUID/client ID).
-
-#### Option 8: Stop DHCP Service
-Stops the `dnsmasq` service cleanly using `systemctl stop dnsmasq`.
-
-#### Option 9: View Staged Configuration File
-Outputs the full contents of `/etc/dnsmasq.d/dhcp-toolkit.conf` (or the local preview file in dry-run mode).
-
-#### Option 10: Safe Teardown & Clean Up
-Stops the service, prompts for confirmation, deletes `/etc/dnsmasq.d/dhcp-toolkit.conf`, and offers to restore the previous backup if one exists. All other configuration files in `/etc/dnsmasq.d/` and `/etc/dnsmasq.conf` are left intact.
-
-#### Option 11: Firewall (UFW) and Netplan Guidance
-Explains protocol firewall requirements (UDP 67 incoming, UDP 68 outgoing). Displays sample Netplan configuration snippets for setting static IPs and allows applying the specific UFW rule upon confirmation.
-
-#### Option 12: Toggle Dry-Run Mode
-Toggles between live execution and simulated dry-run planning.
-
-#### Option 13: Run Built-In Self-Tests
-Executes unit tests for IPv4 validation, integer math conversion, contiguous netmask verification, CIDR calculations, subnet containment, and server IP overlap detection.
+### Step 1: Hypervisor Network Setup (VirtualBox / VMware / UTM)
+1. **Server Machine (Ubuntu 20.04/22.04/24.04)**:
+   - Go to VM **Settings $\to$ Network $\to$ Adapter 2**.
+   - Enable the adapter and set "Attached to" to **Host-Only Network** (e.g., `vboxnet0`) or **Internal Network** (`os-dhcp-lab`).
+2. **Client Machine (Ubuntu / Debian / Alpine)**:
+   - Set its primary network adapter to the **exact same Host-Only or Internal Network**.
+   - Ensure Adapter 1 (NAT/Wi-Fi) is disabled or detached on the client so it only requests DHCP over the lab link.
 
 ---
 
-## 6. Command-Line Options
+### Step 2: Configure Server Static IP via Netplan (Server VM)
+A DHCP server cannot use dynamic addressing on its serving interface.
 
-The toolkit can be operated non-interactively using CLI flags:
-
-| Flag | Long Option | Description |
-|---|---|---|
-| `-h` | `--help` | Display usage instructions and exit |
-| `-d` | `--dry-run` | Launch the toolkit in dry-run simulation mode |
-| `-c` | `--check` | Run system diagnostics and pre-flight checks, then exit |
-| `-s` | `--status` | Show systemd service status, listening sockets, and active leases |
-| `-v` | `--validate` | Validate syntax of existing dnsmasq configuration |
-| `-t` | `--test-math` | Run automated unit tests for IP mathematics and overlap checks |
-| `-V` | `--version` | Display toolkit version |
-
----
-
-## 7. Network Interface & Firewall Setup
-
-### Setting a Static IP via Netplan
-DHCP servers cannot function with a dynamic IP address. In Ubuntu, configure your lab adapter (e.g., `eth1` or `enp0s8`) with a static IP:
-
-Create or edit `/etc/netplan/01-lab-dhcp.yaml`:
+In your Server VM terminal, create or edit `/etc/netplan/01-lab-dhcp.yaml`:
 ```yaml
 network:
   version: 2
   renderer: networkd
   ethernets:
-    enp0s8:
+    enp0s8:  # Replace with your lab interface name (find using: ip link)
       dhcp4: no
       addresses:
         - 192.168.50.1/24
 ```
-Apply the configuration:
+Apply the network settings:
 ```bash
 sudo netplan apply
 ```
+*(Alternatively, configure manually via Ubuntu Settings $\to$ Network $\to$ Gear Icon $\to$ IPv4 $\to$ Manual: `192.168.50.1`, Netmask: `255.255.255.0`)*
 
-### Configuring UFW Firewall
+---
+
+### Step 3: Run the Toolkit on the Server Machine
+```bash
+cd DHCP-Server
+chmod +x dhcp-toolkit.sh
+sudo ./dhcp-toolkit.sh
+```
+1. Select **Option 1**: Run pre-flight diagnostics to verify tools, privileges, and ports.
+2. Select **Option 2**: Choose your configured static interface (e.g., `enp0s8`).
+3. Select **Option 4**: Install `dnsmasq` if not already installed (confirms command before running).
+4. Select **Option 3**: Configure DHCP parameters:
+   - Server IP: `192.168.50.1` (Netmask: `255.255.255.0`)
+   - Pool Start: `192.168.50.10`
+   - Pool End: `192.168.50.100`
+   - Lease Duration: `12h`
+   - Default Gateway: `192.168.50.1`
+   - DNS Servers: `8.8.8.8,1.1.1.1`
+   - Save configuration: `yes`
+5. Select **Option 5**: Validate syntax (`dnsmasq --test`).
+6. Select **Option 6**: Start the DHCP service!
+
+---
+
+### Step 4: Request a Lease on the Client Machine
+On the separate Client VM / physical client:
+```bash
+# Release any existing lease:
+sudo dhclient -r enp0s3
+
+# Request a new lease with verbose output:
+sudo dhclient -v -1 enp0s3
+```
+You will observe the live DORA packets:
+```text
+DHCPDISCOVER on enp0s3 to 255.255.255.255 port 67
+DHCPOFFER of 192.168.50.10 from 192.168.50.1
+DHCPREQUEST for 192.168.50.10 on enp0s3 to 255.255.255.255 port 67
+DHCPACK of 192.168.50.10 from 192.168.50.1
+bound to 192.168.50.10 -- renewal in 21600 seconds.
+```
+
+---
+
+### Step 5: Verify the Lease on Both Machines
+- **On the Client**: Run `ip addr show enp0s3` and `ip route show` to confirm IP `192.168.50.10` and default route `192.168.50.1`.
+- **On the Server**: Select **Option 7** in the toolkit menu to view the live lease table recorded in `/var/lib/misc/dnsmasq.leases`.
+
+---
+
+### Step 6: Safe Teardown & Clean Rollback
+When finished testing:
+1. In the toolkit menu, choose **Option 10** (`Remove Project Configuration & Clean Up`).
+2. Type `yes` to confirm.
+3. The toolkit stops the daemon, unlinks `/etc/dnsmasq.d/dhcp-toolkit.conf`, restores any previous backup, and preserves all other system files.
+
+---
+
+## 5. Built-In Testing & Simulation Modes
+
+The toolkit includes non-destructive command-line modes for code inspection and grading:
+
+### 1. Pure-Bash IP Mathematics Self-Tests
+Verify that all IP arithmetic, 32-bit bitshifts, contiguous netmask checks, and overlap detection functions pass without errors:
+```bash
+./dhcp-toolkit.sh --test-math
+```
+
+### 2. Pre-Flight Diagnostics Check
+Scan the environment, check sudo access, verify network tools, and audit UDP socket bindings:
+```bash
+./dhcp-toolkit.sh --check
+```
+
+### 3. Non-Destructive Dry-Run Mode
+Simulate the full menu, configure parameters, and review staged configuration in a local preview file without touching `/etc` or running system services:
+```bash
+./dhcp-toolkit.sh --dry-run
+```
+
+---
+
+## 6. Menu-Driven Toolkit Reference
+
+| Option | Name | Description |
+|---|---|---|
+| **[1]** | **Pre-flight Diagnostics** | Audits Ubuntu release version, tool availability (`ip`, `ss`, `grep`), sudo rights, and scans ports 67 and 53 for socket conflicts. |
+| **[2]** | **Select Network Interface** | Discovers non-loopback adapters, shows IP/CIDR and MAC address. Triggers safety confirmation if Wi-Fi or default gateway route is detected. |
+| **[3]** | **Configure DHCP Settings** | Interactive wizard for subnet mask, IP range, lease duration, gateway (Option 3), DNS (Option 6), and domain (Option 15). Enforces server IP anti-overlap invariant. |
+| **[4]** | **Install / Verify dnsmasq** | Displays the exact `apt-get` installation command and requests explicit confirmation before package installation. |
+| **[5]** | **Validate Configuration Syntax** | Runs `dnsmasq --test --conf-file=...` to verify configuration validity without restarting services. |
+| **[6]** | **Start / Restart DHCP Service** | Enforces syntax validation gate first, then safely reloads/restarts the service via `systemctl` or direct process in namespaces. |
+| **[7]** | **View Status & Active Leases** | Displays service active state, port 67 socket binding, and formatted lease table from `/var/lib/misc/dnsmasq.leases` with human-readable timestamps. |
+| **[8]** | **Stop DHCP Service** | Gracefully stops the DHCP server daemon. |
+| **[9]** | **View Staged Configuration** | Displays the active or staged `/etc/dnsmasq.d/dhcp-toolkit.conf` file. |
+| **[10]** | **Safe Project Teardown** | Prompts for confirmation, stops the service, deletes **only** `dhcp-toolkit.conf`, and offers to restore the previous backup. |
+| **[11]** | **Firewall & Netplan Guidance** | Details UDP ports 67/68, displays Netplan static IP configuration snippets, and offers to add a targeted UFW firewall rule. |
+| **[12]** | **Toggle Dry-Run Mode** | Switches runtime mode between live system operations and simulated preview execution. |
+| **[13]** | **Run Built-In Self-Tests** | Executes the automated test suite for IPv4 validation, integer math, and boundary enforcement. |
+| **[0]** | **Exit Toolkit** | Exits cleanly. |
+
+---
+
+## 7. Command-Line Flags
+
+| Flag | Long Option | Description |
+|---|---|---|
+| `-h` | `--help` | Show CLI flag summary and safety guidelines |
+| `-d` | `--dry-run` | Launch the toolkit in dry-run simulation mode |
+| `-c` | `--check` | Run system diagnostics and pre-flight checks, then exit |
+| `-s` | `--status` | Show systemd service status, listening sockets, and active leases |
+| `-v` | `--validate` | Validate syntax of existing dnsmasq configuration |
+| `-t` | `--test-math` | Run automated self-tests for IP math and safety rules |
+| `-V` | `--version` | Display toolkit version |
+
+---
+
+## 8. Defensive Engineering Highlights
+
+### 1. Pure-Bash 32-Bit Arithmetic
+To maintain compatibility across all bash environments without relying on external python, perl, or bc binaries, IP addresses are converted to 32-bit integers using arithmetic bit-shifts:
+$$\text{ip\_int} = (o_1 \ll 24) + (o_2 \ll 16) + (o_3 \ll 8) + o_4$$
+Contiguous netmask verification checks that inverted bits plus one equals a single set bit:
+$$(({\sim}\text{mask\_int} + 1) \ \& \ {\sim}\text{mask\_int}) == 0$$
+
+### 2. Server IP Anti-Overlap Invariant
+Allocating the server's own IP address causes catastrophic ARP conflicts and severs communication with all clients. The toolkit enforces:
+$$\text{server\_ip\_int} \ge \text{start\_ip\_int} \quad \land \quad \text{server\_ip\_int} \le \text{end\_ip\_int}$$
+If this evaluates to true, the configuration wizard halts and requires the administrator to select a range that excludes the server.
+
+### 3. Conflict Avoidance with `systemd-resolved`
+Ubuntu 20.04+ runs `systemd-resolved` on `127.0.0.53:53`. Attempting to start a standard DNS daemon causes an `Address already in use` fatal crash. This toolkit automatically adds `port=0` to `/etc/dnsmasq.d/dhcp-toolkit.conf`, disabling the DNS listener and configuring `dnsmasq` to run strictly as a lightweight DHCP daemon.
+
+### 4. Zero `eval` Policy & Strict Scripting Standards
+The code adheres to defensive shell best practices:
+- Zero occurrences of `eval`.
+- Mandatory variable quoting.
+- Explicit `set -euo pipefail` error handling.
+- ANSI escape stripping from log files to prevent log-injection vulnerabilities.
+
+---
+
+## 9. Firewall (UFW) Configuration Reference
+
 If Ubuntu's Uncomplicated Firewall (UFW) is active:
 ```bash
-# Allow DHCP discovery and request packets from clients on lab interface:
+# Allow DHCP discovery and request packets from clients on the lab interface:
 sudo ufw allow in on enp0s8 to any port 67 proto udp comment 'DHCP Server Lab'
 
-# Optional: If running DNS forwarder on lab interface:
+# Optional: If DNS forwarder is enabled on lab interface:
 sudo ufw allow in on enp0s8 to any port 53 comment 'Lab DNS'
 ```
 
 ---
 
-## 8. Troubleshooting Guide
+## 10. Professor Presentation Cheat Sheet
 
-| Issue | Cause | Solution |
-|---|---|---|
-| **`dnsmasq: failed to bind DHCP server socket (Address already in use)`** | Another daemon (e.g., `isc-dhcp-server`, `kea`, or an older `dnsmasq` instance) is holding UDP port 67. | Run `./dhcp-toolkit.sh --check` to identify conflicting PIDs with `ss -ulpn`. Stop the competing service: `sudo systemctl stop isc-dhcp-server`. |
-| **`failed to create listening socket for port 53: Address already in use`** | `systemd-resolved` is listening on `127.0.0.53:53`. | The toolkit automatically includes `port=0` in `/etc/dnsmasq.d/dhcp-toolkit.conf` to disable the DNS listener when only DHCP is needed. |
-| **`Server IP overlap detected!`** | The proposed DHCP start-end range contains the server's own static IP address. | Adjust the DHCP pool range so that the server IP is excluded (e.g., Server: `192.168.50.1`, Pool: `192.168.50.10` to `192.168.50.100`). |
-| **Client machines not receiving leases** | 1. Interface is DOWN.<br>2. Client and server are not on the same virtual switch/VLAN.<br>3. Firewall is dropping UDP 67 packets. | 1. Ensure `ip link set <iface> up`.<br>2. Verify hypervisor adapter settings (both VMs set to same Internal/Host-Only network).<br>3. Review firewall rules with `sudo ufw status`. |
-| **Syntax validation failure** | Missing directive or corrupted configuration line. | Run Option 5 (`dnsmasq --test`) or inspect `/etc/dnsmasq.d/dhcp-toolkit.conf`. Restore previous backup using Option 10. |
+Use these concise, technical answers when explaining the project to your instructor:
 
----
-
-## 9. Logging & Auditing
-
-The toolkit maintains structured logs without storing sensitive information:
-- **Root/Production Mode**: Logs are written to `/var/log/dhcp-toolkit.log`.
-- **Non-Root / Dry-Run Mode**: Logs are written to `./dhcp-toolkit.log`.
-
-Sample log entry:
-```
-[2026-11-22 17:30:42] [INFO] Generating dnsmasq configuration for interface eth0...
-[2026-11-22 17:30:42] [SUCCESS] Configuration written to /etc/dnsmasq.d/dhcp-toolkit.conf
-[2026-11-22 17:30:42] [INFO] Validating configuration file: /etc/dnsmasq.d/dhcp-toolkit.conf
-[2026-11-22 17:30:42] [SUCCESS] Configuration syntax validation PASSED: syntax check OK.
-```
+| Question | Winning Answer |
+|---|---|
+| **"Why did you use `dnsmasq` instead of `isc-dhcp-server`?"** | *"ISC-DHCP-Server reached end-of-life (EOL) in 2022. `dnsmasq` is standard on modern Ubuntu, actively maintained, lightweight, and supports modular configuration directories."* |
+| **"How did you avoid port 53 clashes with `systemd-resolved`?"** | *"Ubuntu runs `systemd-resolved` on `127.0.0.53:53`. In `/etc/dnsmasq.d/dhcp-toolkit.conf`, I explicitly inject `port=0` so `dnsmasq` operates purely as a DHCP daemon without binding to DNS port 53."* |
+| **"Why is a rogue DHCP server dangerous?"** | *"DHCP operates via broadcast. A rogue server answering `DHCPDISCOVER` faster than legitimate routers can inject an invalid subnet (causing denial of service) or inject its own IP as default gateway to execute a Man-in-the-Middle attack."* |
+| **"How did you demonstrate client allocation on a single VM?"** | *"I used Linux Network Namespaces (`ip netns`) and virtual ethernet (`veth`) pairs. This leverages the Linux kernel's process isolation primitives to create an air-gapped broadcast domain on a single machine."* |
+| **"What happens during lease renewal ($T_1$) vs rebinding ($T_2$)?"** | *"At $T_1$ (50% of lease time), the client unicasts a `DHCPREQUEST` to the original server. If no response is received by $T_2$ (87.5%), it broadcasts `DHCPREQUEST` to any available server on the subnet."* |
 
 ---
 
-## 10. Academic Integrity and Ethical Usage
+## 11. Project File Manifest
 
-This toolkit was developed for educational purposes as part of an Operating Systems curriculum. Setting up network services that intercept or manipulate network traffic without explicit authorization is illegal under computer misuse legislation and institutional policies. Always conduct testing inside an isolated virtual lab environment.
+```
+DHCP-Server/
+├── dhcp-toolkit.sh        # Main interactive menu-driven Bash toolkit
+├── demo-lab.sh            # 1-VM Network Namespace demonstration assistant
+├── README.md              # Complete technical documentation & setup guides
+├── report-outline.md      # Academic course report outline
+├── test-plan.md           # 34-test verification plan & test reporting matrix
+└── .gitignore             # Ignores runtime logs, leases, previews, and backups
+```
